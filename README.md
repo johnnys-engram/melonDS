@@ -35,6 +35,16 @@ As for the rest, the interface should be pretty straightforward. If you have a q
 ## How to build
 See [BUILD.md](./BUILD.md) for build instructions.
 
+## Local fork notes (support emulator)
+
+This checkout is used as a **support emulator** for other NDS projects. Local docs:
+
+- [docs/README.md](./docs/README.md) — overview
+- [docs/CLI-INSTANCES.md](./docs/CLI-INSTANCES.md) — `--instances` local MP CLI
+- [docs/AI-CONSUMER-GUIDE.md](./docs/AI-CONSUMER-GUIDE.md) — agent / consumer launch paths
+
+Runtime scripts: `C:\~Coding\Emulation\~Emulators\` (`AI-MELONDS-LAUNCH.md`).
+
 ## TODO LIST
 
  * better DSi emulation

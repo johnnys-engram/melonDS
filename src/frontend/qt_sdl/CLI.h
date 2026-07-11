@@ -34,6 +34,8 @@ struct CommandLineOptions
     std::optional<QString> gbaRomArchivePath;
     bool fullscreen;
     bool boot;
+    // Local MP instance count (1 = single player). Matches kMaxEmuInstances (16).
+    int instances = 1;
 };
 
 extern CommandLineOptions* ManageArgs(QApplication& melon);

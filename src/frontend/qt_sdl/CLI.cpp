@@ -43,6 +43,8 @@ CommandLineOptions* ManageArgs(QApplication& melon)
 
     parser.addOption(QCommandLineOption({"b", "boot"}, "Whether to boot firmware on startup. Defaults to \"auto\" (boot if NDS rom given)", "auto/always/never", "auto"));
     parser.addOption(QCommandLineOption({"f", "fullscreen"}, "Start melonDS in fullscreen mode"));
+    // Matches kMaxEmuInstances in main.cpp (local MP in-process slots).
+    parser.addOption(QCommandLineOption({"n", "instances"}, "Number of local multiplayer instances to start (1-16). Same ROM/saves as File > Multiplayer > Launch new instance (.sav, .sav.2, ...)", "count", "1"));
 
 #ifdef ARCHIVE_SUPPORT_ENABLED
     parser.addOption(QCommandLineOption({"a", "archive-file"}, "Specify file to load inside an archive given (NDS)", "rom"));
@@ -54,6 +56,7 @@ CommandLineOptions* ManageArgs(QApplication& melon)
     CommandLineOptions* options = new CommandLineOptions;
 
     options->fullscreen = parser.isSet("fullscreen");
+    options->instances = 1;
 
     QStringList posargs = parser.positionalArguments();
     switch (posargs.size())
@@ -85,6 +88,24 @@ CommandLineOptions* ManageArgs(QApplication& melon)
     {
         Log(LogLevel::Error, "ERROR: -b/--boot only accepts auto/always/never as arguments\n");
         exit(1);
+    }
+
+    {
+        bool ok = false;
+        const int instances = parser.value("instances").toInt(&ok);
+        // Keep in sync with kMaxEmuInstances in main.cpp.
+        constexpr int kMaxInstances = 16;
+        if (!ok || instances < 1 || instances > kMaxInstances)
+        {
+            Log(LogLevel::Error, "ERROR: -n/--instances must be an integer from 1 to %d\n", kMaxInstances);
+            exit(1);
+        }
+        if (instances > 1 && !options->dsRomPath.has_value())
+        {
+            Log(LogLevel::Error, "ERROR: -n/--instances > 1 requires an NDS ROM path\n");
+            exit(1);
+        }
+        options->instances = instances;
     }
 
 #ifdef ARCHIVE_SUPPORT_ENABLED

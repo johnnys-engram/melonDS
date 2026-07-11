@@ -422,6 +422,29 @@ int main(int argc, char** argv)
 
         if (options->fullscreen)
             win->toggleFullscreen();
+
+        // Spawn additional local-MP instances (same as File > Multiplayer > Launch new instance),
+        // but also preload the same ROM. Saves use vanilla instanceFileSuffix (.sav, .sav.2, ...).
+        for (int i = 1; i < options->instances; i++)
+        {
+            if (!createEmuInstance())
+            {
+                printf("Failed to create local MP instance %d\n", i);
+                break;
+            }
+
+            MainWindow* instWin = emuInstances[i]->getMainWindow();
+            if (!instWin)
+            {
+                printf("Local MP instance %d has no main window\n", i);
+                break;
+            }
+
+            instWin->preloadROMs(dsfile, gbafile, options->boot);
+        }
+
+        if (options->instances > 1)
+            printf("Local MP: started %d instances\n", numEmuInstances());
     }
 
     int ret = melon.exec();
