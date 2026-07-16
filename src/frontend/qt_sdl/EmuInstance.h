@@ -244,6 +244,8 @@ private:
 
     void onKeyPress(QKeyEvent* event);
     void onKeyRelease(QKeyEvent* event);
+    void applyKeyPress(QKeyEvent* event);
+    void applyKeyRelease(QKeyEvent* event);
     void keyReleaseAll();
 
     void openJoystick();
@@ -380,6 +382,7 @@ private:
 
     friend class EmuThread;
     friend class MainWindow;
+    friend class ScreenPanel;
 };
 
 #endif //EMUINSTANCE_H

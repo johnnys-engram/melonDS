@@ -36,6 +36,8 @@ struct CommandLineOptions
     bool boot;
     // Local MP instance count (1 = single player). Matches kMaxEmuInstances (16).
     int instances = 1;
+    // "none" (default) or "auto" (2=side+even+lock, 4=grid+top+lock).
+    QString mpLayout = "none";
 };
 
 extern CommandLineOptions* ManageArgs(QApplication& melon);

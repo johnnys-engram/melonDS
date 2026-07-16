@@ -72,6 +72,8 @@ DefaultList<int> DefaultInts =
     {"Instance*.Gdb.ARM9.Port", 3333},
 #endif
     {"LAN.HostNumPlayers", 16},
+    {"WindowGroup.PanelWidth", 0},
+    {"WindowGroup.PanelHeight", 0},
 };
 
 RangeList IntRanges =
@@ -112,6 +114,8 @@ DefaultList<bool> DefaultBools =
 #endif
     {"DSi.DSP.HLE", true},
     {"Instance*.RTC.SyncToHost", true},
+    {"WindowGroup.LockPositions", false},
+    {"WindowGroup.HideMenuBar", false},
 };
 
 DefaultList<std::string> DefaultStrings =

@@ -30,6 +30,7 @@
 #include <QProcess>
 #include <QApplication>
 #include <QMessageBox>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMimeDatabase>
 #include <QFileDialog>
@@ -41,8 +42,12 @@
 #include <QVector>
 #include <QCommandLineParser>
 #include <QDesktopServices>
+#include <QLineEdit>
+#include <QInputMethodEvent>
+#include <QVBoxLayout>
 
 #include "main.h"
+#include "WindowGroup.h"
 #include "CheatsDialog.h"
 #include "DateTimeDialog.h"
 #include "EmuSettingsDialog.h"
@@ -82,6 +87,96 @@ using namespace melonDS;
 
 extern CameraManager* camManager[2];
 extern bool camStarted[2];
+
+namespace
+{
+
+// Hidden IME target: RustDesk Android soft keyboard reliably delivers into
+// QLineEdit (Input Config works for the same reason), but not into the GL panel.
+class MelonKeySink : public QLineEdit
+{
+public:
+    explicit MelonKeySink(MainWindow* win)
+        : QLineEdit(win), mainWin(win)
+    {
+        setObjectName(QStringLiteral("melonKeySink"));
+        setAttribute(Qt::WA_InputMethodEnabled, true);
+        setFocusPolicy(Qt::StrongFocus);
+        setFrame(false);
+        setMaxLength(8);
+        setFixedHeight(1);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setStyleSheet(QStringLiteral(
+            "QLineEdit { border: 0; margin: 0; padding: 0;"
+            " background: transparent; color: transparent; }"));
+        setToolTip(QString());
+        setContextMenuPolicy(Qt::NoContextMenu);
+    }
+
+protected:
+    void focusInEvent(QFocusEvent* event) override
+    {
+        QLineEdit::focusInEvent(event);
+        if (mainWin)
+            mainWin->onFocusIn();
+    }
+
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        if (mainWin && !event->isAutoRepeat())
+            mainWin->routeKeyEvent(event, true);
+        clear();
+        event->accept();
+    }
+
+    void keyReleaseEvent(QKeyEvent* event) override
+    {
+        if (mainWin && !event->isAutoRepeat())
+            mainWin->routeKeyEvent(event, false);
+        event->accept();
+    }
+
+    void inputMethodEvent(QInputMethodEvent* event) override
+    {
+        const QString commit = event->commitString();
+        for (const QChar ch : commit)
+        {
+            if (ch.isNull())
+                continue;
+            const QString text(ch);
+            int key = 0;
+            const QChar u = ch.toUpper();
+            if (u >= QLatin1Char('A') && u <= QLatin1Char('Z'))
+                key = Qt::Key_A + (u.unicode() - QLatin1Char('A').unicode());
+            else if (u >= QLatin1Char('0') && u <= QLatin1Char('9'))
+                key = Qt::Key_0 + (u.unicode() - QLatin1Char('0').unicode());
+            else
+                key = ch.unicode();
+
+            QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, text);
+            QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier, text);
+            if (mainWin)
+            {
+                mainWin->routeKeyEvent(&press, true);
+                mainWin->routeKeyEvent(&release, false);
+            }
+        }
+        clear();
+        event->accept();
+    }
+
+    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override
+    {
+        if (query == Qt::ImEnabled)
+            return true;
+        return QLineEdit::inputMethodQuery(query);
+    }
+
+private:
+    MainWindow* mainWin;
+};
+
+} // namespace
 
 
 QString NdsRomMimeType = "application/x-nintendo-ds-rom";
@@ -372,6 +467,9 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             actReset = menu->addAction("Reset");
             connect(actReset, &QAction::triggered, this, &MainWindow::onReset);
 
+            actResetAll = menu->addAction("Reset all");
+            connect(actResetAll, &QAction::triggered, this, &MainWindow::onResetAll);
+
             actStop = menu->addAction("Stop");
             connect(actStop, &QAction::triggered, this, &MainWindow::onStop);
 
@@ -415,6 +513,29 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 actMPNewInstance = submenu->addAction("Launch new instance");
                 connect(actMPNewInstance, &QAction::triggered, this, &MainWindow::onMPNewInstance);
+
+                submenu->addSeparator();
+
+                actMPArrangeSideBySide = submenu->addAction("Arrange side by side");
+                connect(actMPArrangeSideBySide, &QAction::triggered, this, &MainWindow::onMPArrangeSideBySide);
+
+                actMPArrangeGrid2x2 = submenu->addAction("Arrange 2x2");
+                connect(actMPArrangeGrid2x2, &QAction::triggered, this, &MainWindow::onMPArrangeGrid2x2);
+
+                actMPDualScreenAll = submenu->addAction("Dual screen (all instances)");
+                connect(actMPDualScreenAll, &QAction::triggered, this, &MainWindow::onMPDualScreenAll);
+
+                actMPTopOnlyAll = submenu->addAction("Top only (all instances)");
+                connect(actMPTopOnlyAll, &QAction::triggered, this, &MainWindow::onMPTopOnlyAll);
+
+                actMPLockPositions = submenu->addAction("Lock window positions");
+                actMPLockPositions->setCheckable(true);
+                connect(actMPLockPositions, &QAction::triggered, this, &MainWindow::onMPLockPositions);
+
+                actMPLinkedInput = submenu->addAction("Linked input");
+                actMPLinkedInput->setCheckable(true);
+                actMPLinkedInput->setChecked(isLinkedInput());
+                connect(actMPLinkedInput, &QAction::triggered, this, &MainWindow::onMPLinkedInput);
 
                 submenu->addSeparator();
 
@@ -574,6 +695,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
             actShowOSD = menu->addAction("Show OSD");
             actShowOSD->setCheckable(true);
             connect(actShowOSD, &QAction::triggered, this, &MainWindow::onChangeShowOSD);
+
+            actHideMenuBar = menu->addAction("Hide menu bar");
+            actHideMenuBar->setCheckable(true);
+            connect(actHideMenuBar, &QAction::triggered, this, &MainWindow::onChangeHideMenuBar);
         }
         {
             QMenu * menu = menubar->addMenu("Config");
@@ -684,6 +809,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
         actPause->setEnabled(false);
         actReset->setEnabled(false);
+        actResetAll->setEnabled(false);
         actStop->setEnabled(false);
         actFrameStep->setEnabled(false);
 
@@ -729,6 +855,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
         actScreenFiltering->setChecked(windowCfg.GetBool("ScreenFilter"));
         actShowOSD->setChecked(showOSD);
+        actHideMenuBar->setChecked(WindowGroup::isHideMenuBar());
 
         actLimitFramerate->setChecked(emuInstance->doLimitFPS);
         actAudioSync->setChecked(emuInstance->doAudioSync);
@@ -754,6 +881,7 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
     onUpdateInterfaceSettings();
 
     updateMPInterface(MPInterface::GetType());
+    WindowGroup::attachMainWindow(this);
 }
 
 MainWindow::~MainWindow()
@@ -780,6 +908,9 @@ void MainWindow::saveEnabled(bool enabled)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // Local MP: closing any primary window tears down the whole group.
+    WindowGroup::closeGroupFrom(this);
+
     if (emuInstance)
     {
         if (windowID == 0)
@@ -812,6 +943,11 @@ void MainWindow::createScreenPanel()
 {
     auto oldpanel = panel;
     panel = nullptr;
+
+    // Keep the key sink alive across panel rebuilds (central widget is replaced).
+    if (keySink)
+        keySink->setParent(this);
+
     if (oldpanel) delete oldpanel;
 
     hasOGL = globalCfg.GetBool("Screen.UseGL") ||
@@ -852,7 +988,17 @@ void MainWindow::createScreenPanel()
         panel = panelNative;
         panel->show();
     }
-    setCentralWidget(panel);
+
+    // Keep a 1px IME sink above the panel so remote soft keyboards have a real
+    // text target (GL/native panels often never see those key events).
+    QWidget* holder = new QWidget(this);
+    auto* layout = new QVBoxLayout(holder);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    ensureKeySink();
+    layout->addWidget(keySink);
+    layout->addWidget(panel, 1);
+    setCentralWidget(holder);
 
     if (hasMenu)
         actScreenFiltering->setEnabled(hasOGL);
@@ -862,6 +1008,35 @@ void MainWindow::createScreenPanel()
 
     connect(this, SIGNAL(screenLayoutChange()), panel, SLOT(onScreenLayoutChanged()));
     emit screenLayoutChange();
+
+    // After layout settles / GL takes native focus, reclaim the IME sink.
+    QTimer::singleShot(0, this, [this]{ focusKeySink(); });
+}
+
+void MainWindow::ensureKeySink()
+{
+    if (keySink)
+        return;
+
+    keySink = new MelonKeySink(this);
+}
+
+void MainWindow::focusKeySink()
+{
+    // Do not steal focus from Input Config (modeless) or other modal dialogs.
+    if (InputConfigDialog::currentDlg)
+        return;
+    if (QApplication::activeModalWidget())
+        return;
+
+    ensureKeySink();
+    if (keySink && !keySink->hasFocus())
+        keySink->setFocus(Qt::OtherFocusReason);
+}
+
+bool MainWindow::isKeySink(QWidget* w) const
+{
+    return w && keySink && w == keySink;
 }
 
 GL::Context* MainWindow::getOGLContext()
@@ -936,6 +1111,16 @@ void MainWindow::keyReleaseEvent(QKeyEvent* event)
     if (event->isAutoRepeat()) return;
 
     emuInstance->onKeyRelease(event);
+}
+
+void MainWindow::routeKeyEvent(QKeyEvent* event, bool press)
+{
+    if (!emuInstance || !event || event->isAutoRepeat())
+        return;
+    if (press)
+        emuInstance->onKeyPress(event);
+    else
+        emuInstance->onKeyRelease(event);
 }
 
 
@@ -1028,11 +1213,20 @@ void MainWindow::onFocusIn()
 
 void MainWindow::onFocusOut()
 {
-    // focusOutEvent is called through the window close event handler
-    // prevent use after free
+    // Intra-window moves (panel → key sink) are not a real focus loss.
+    QWidget* fw = QApplication::focusWidget();
+    if (fw && isAncestorOf(fw))
+    {
+        focused = true;
+        return;
+    }
+
     focused = false;
     if (emuInstance)
+    {
+        emuInstance->keyReleaseAll();
         emuInstance->updateAudioMuteByWindowFocus();
+    }
 }
 
 void MainWindow::onAppStateChanged(Qt::ApplicationState state)
@@ -1662,6 +1856,11 @@ void MainWindow::onReset()
     emuThread->emuReset();
 }
 
+void MainWindow::onResetAll()
+{
+    WindowGroup::resetAll();
+}
+
 void MainWindow::onStop()
 {
     if (!emuThread->emuIsActive()) return;
@@ -1739,6 +1938,88 @@ void MainWindow::onOpenTitleManager()
 void MainWindow::onMPNewInstance()
 {
     createEmuInstance();
+    updateMPInterface(MPInterface::GetType());
+    // Refresh enable state on all open primary windows
+    for (int i = 0; i < 16; i++)
+    {
+        EmuInstance* inst = ::getEmuInstance(i);
+        if (!inst) continue;
+        MainWindow* win = inst->getMainWindow();
+        if (win && win != this)
+            win->updateMPInterface(MPInterface::GetType());
+    }
+}
+
+void MainWindow::onMPArrangeSideBySide()
+{
+    WindowGroup::arrangeSideBySide();
+}
+
+void MainWindow::onMPArrangeGrid2x2()
+{
+    WindowGroup::arrangeGrid2x2();
+}
+
+void MainWindow::onMPDualScreenAll()
+{
+    WindowGroup::applyEvenAll();
+}
+
+void MainWindow::onMPTopOnlyAll()
+{
+    WindowGroup::applyTopOnlyAll();
+}
+
+void MainWindow::onMPLockPositions(bool checked)
+{
+    WindowGroup::setLocked(checked);
+}
+
+void MainWindow::onMPLinkedInput(bool checked)
+{
+    setLinkedInput(checked);
+
+    // Sync the checkmark across all windows.
+    for (int i = 0; i < 16; i++)
+    {
+        EmuInstance* inst = ::getEmuInstance(i);
+        if (!inst) continue;
+        MainWindow* win = inst->getMainWindow();
+        if (win && win->actMPLinkedInput)
+            win->actMPLinkedInput->setChecked(checked);
+    }
+
+    if (checked)
+    {
+        EmuInstance* primary = ::getEmuInstance(0);
+        if (primary)
+            primary->osdAddMessage(0, "Linked input ON");
+    }
+    else
+    {
+        EmuInstance* primary = ::getEmuInstance(0);
+        if (primary)
+            primary->osdAddMessage(0, "Linked input OFF");
+    }
+}
+
+void MainWindow::applyScreenSizing(int sizing)
+{
+    if (sizing < 0 || sizing >= screenSizing_MAX)
+        return;
+
+    windowCfg.SetInt("ScreenSizing", sizing);
+    if (hasMenu && actScreenSizing[sizing])
+        actScreenSizing[sizing]->setChecked(true);
+    emit screenLayoutChange();
+}
+
+void MainWindow::setIntegerScaling(bool enabled)
+{
+    windowCfg.SetBool("IntegerScaling", enabled);
+    if (hasMenu && actIntegerScaling)
+        actIntegerScaling->setChecked(enabled);
+    emit screenLayoutChange();
 }
 
 void MainWindow::onLANStartHost()
@@ -1784,6 +2065,24 @@ void MainWindow::updateMPInterface(MPInterfaceType type)
     /*actNPStartHost->setEnabled(enable);
     actNPStartClient->setEnabled(enable);
     actNPTest->setEnabled(enable);*/
+
+    bool multi = enable && (numEmuInstances() >= 2);
+    if (actMPArrangeSideBySide) actMPArrangeSideBySide->setEnabled(multi);
+    if (actMPArrangeGrid2x2) actMPArrangeGrid2x2->setEnabled(multi);
+    if (actMPDualScreenAll) actMPDualScreenAll->setEnabled(enable);
+    if (actMPTopOnlyAll) actMPTopOnlyAll->setEnabled(enable);
+    if (actMPLockPositions)
+    {
+        actMPLockPositions->setEnabled(multi);
+        actMPLockPositions->setChecked(WindowGroup::isLocked());
+    }
+    if (actMPLinkedInput)
+    {
+        actMPLinkedInput->setEnabled(multi);
+        actMPLinkedInput->setChecked(isLinkedInput());
+    }
+    if (actResetAll)
+        actResetAll->setEnabled(multi && emuThread->emuIsActive());
 }
 
 bool MainWindow::lanWarning(bool host)
@@ -2112,6 +2411,11 @@ void MainWindow::onChangeShowOSD(bool checked)
     windowCfg.SetBool("ShowOSD", showOSD);
 }
 
+void MainWindow::onChangeHideMenuBar(bool checked)
+{
+    WindowGroup::setHideMenuBar(checked);
+}
+
 void MainWindow::onChangeLimitFramerate(bool checked)
 {
     emuInstance->doLimitFPS = checked;
@@ -2156,20 +2460,73 @@ void MainWindow::onTitleUpdate(QString title)
 void MainWindow::toggleFullscreen()
 {
     if (!isFullScreen())
-    {
         showFullScreen();
-        if (hasMenu)
-            menuBar()->setFixedHeight(0); // Don't use hide() as menubar actions stop working
+    else
+        showNormal();
+
+    applyMenuBarVisibility();
+}
+
+void MainWindow::applyMenuBarVisibility()
+{
+    if (!hasMenu)
+        return;
+
+    const bool hide = isFullScreen() || WindowGroup::isHideMenuBar();
+    if (hide)
+    {
+        // Don't use hide() as menubar actions stop working
+        menuBar()->setFixedHeight(0);
     }
     else
     {
-        showNormal();
-        if (hasMenu)
-        {
-            int menuBarHeight = menuBar()->sizeHint().height();
-            menuBar()->setFixedHeight(menuBarHeight);
-        }
+        menuBar()->setFixedHeight(menuBar()->sizeHint().height());
     }
+}
+
+void MainWindow::showCompactMenu(const QPoint& globalPos)
+{
+    if (!hasMenu)
+        return;
+
+    QMenu menu(this);
+
+    // Quick strip — shared QActions (live enable/checked).
+    if (actPause)
+        menu.addAction(actPause);
+    if (actReset)
+        menu.addAction(actReset);
+    if (actResetAll && actResetAll->isEnabled())
+        menu.addAction(actResetAll);
+    if (actStop)
+        menu.addAction(actStop);
+
+    if (actMPLinkedInput && numEmuInstances() >= 2)
+    {
+        actMPLinkedInput->setEnabled(true);
+        actMPLinkedInput->setChecked(isLinkedInput());
+        menu.addAction(actMPLinkedInput);
+    }
+
+    menu.addSeparator();
+
+    // Cascades from the same top-level menus / shared QActions.
+    for (QAction* top : menuBar()->actions())
+    {
+        QMenu* src = top->menu();
+        if (!src)
+            continue;
+
+        QMenu* sub = menu.addMenu(top->text());
+        for (QAction* a : src->actions())
+            sub->addAction(a);
+    }
+
+    menu.addSeparator();
+    if (actHideMenuBar)
+        menu.addAction(actHideMenuBar);
+
+    menu.exec(globalPos);
 }
 
 void MainWindow::onFullscreenToggled()
@@ -2215,6 +2572,8 @@ void MainWindow::onEmuStart()
     actPause->setEnabled(true);
     actPause->setChecked(false);
     actReset->setEnabled(true);
+    if (actResetAll)
+        actResetAll->setEnabled(numEmuInstances() >= 2);
     actStop->setEnabled(true);
     actFrameStep->setEnabled(true);
 
@@ -2237,6 +2596,8 @@ void MainWindow::onEmuStop()
 
     actPause->setEnabled(false);
     actReset->setEnabled(false);
+    if (actResetAll)
+        actResetAll->setEnabled(false);
     actStop->setEnabled(false);
     actFrameStep->setEnabled(false);
 

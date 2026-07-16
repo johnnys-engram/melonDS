@@ -23,8 +23,9 @@
 
 #include <QPaintEvent>
 #include <QPainter>
-
+#include <QKeyEvent>
 #include <QDateTime>
+#include <QTimer>
 
 #include "OpenGLSupport.h"
 #include "duckstation/gl/context.h"
@@ -253,6 +254,18 @@ void ScreenPanel::resizeEvent(QResizeEvent* event)
 void ScreenPanel::mousePressEvent(QMouseEvent* event)
 {
     event->accept();
+
+    // Prefer the IME key sink over the GL/native panel — remote soft keyboards
+    // (RustDesk Android) often only deliver into text-capable widgets.
+    if (mainWindow)
+        mainWindow->focusKeySink();
+
+    if (event->button() == Qt::RightButton)
+    {
+        mainWindow->showCompactMenu(event->globalPosition().toPoint());
+        return;
+    }
+
     if (!emuInstance->emuIsActive()) { touching = false; return; }
     if (event->button() != Qt::LeftButton) return;
 
@@ -296,6 +309,22 @@ void ScreenPanel::mouseMoveEvent(QMouseEvent* event)
     {
         emuInstance->touchScreen(x, y);
     }
+}
+
+void ScreenPanel::keyPressEvent(QKeyEvent* event)
+{
+    // Same path as Input Config MapButton: handle keys on the focused screen widget
+    // so remote injection (RustDesk Android) is not lost to GL/native focus quirks.
+    if (!event->isAutoRepeat())
+        emuInstance->onKeyPress(event);
+    event->accept();
+}
+
+void ScreenPanel::keyReleaseEvent(QKeyEvent* event)
+{
+    if (!event->isAutoRepeat())
+        emuInstance->onKeyRelease(event);
+    event->accept();
 }
 
 void ScreenPanel::tabletEvent(QTabletEvent* event)
@@ -390,7 +419,11 @@ bool ScreenPanel::event(QEvent* event)
         return true;
     }
     else if (event->type() == QEvent::FocusIn)
+    {
         mainWindow->onFocusIn();
+        // Redirect keyboard focus to the IME sink (GL panels are bad soft-KB targets).
+        QTimer::singleShot(0, mainWindow, [mw = mainWindow]{ mw->focusKeySink(); });
+    }
     else if (event->type() == QEvent::FocusOut)
         mainWindow->onFocusOut();
 

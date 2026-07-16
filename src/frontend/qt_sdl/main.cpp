@@ -36,6 +36,7 @@
 #include <QVector>
 #include <QCommandLineParser>
 #include <QStandardPaths>
+#include <QTimer>
 #ifndef _WIN32
 #include <QGuiApplication>
 #include <QSocketNotifier>
@@ -61,6 +62,8 @@
 #include "Net.h"
 
 #include "CLI.h"
+#include "WindowGroup.h"
+#include "InputConfig/InputConfigDialog.h"
 
 #include "Net_PCap.h"
 #include "Net_Slirp.h"
@@ -83,6 +86,18 @@ Net net;
 
 
 QElapsedTimer sysTimer;
+
+static bool linkedInput = false;
+
+bool isLinkedInput()
+{
+    return linkedInput;
+}
+
+void setLinkedInput(bool enabled)
+{
+    linkedInput = enabled;
+}
 
 
 void NetInit()
@@ -162,6 +177,13 @@ int numEmuInstances()
     }
 
     return ret;
+}
+
+EmuInstance* getEmuInstance(int id)
+{
+    if (id < 0 || id >= kMaxEmuInstances)
+        return nullptr;
+    return emuInstances[id];
 }
 
 
@@ -264,6 +286,70 @@ bool MelonApplication::event(QEvent *event)
     }
 
     return QApplication::event(event);
+}
+
+bool MelonApplication::notify(QObject* receiver, QEvent* event)
+{
+    const QEvent::Type type = event->type();
+    if (type == QEvent::KeyPress || type == QEvent::KeyRelease)
+    {
+        auto* ke = static_cast<QKeyEvent*>(event);
+        if (!ke->isAutoRepeat())
+        {
+            // Leave Input Config / modal dialogs alone (MapButton must keep focus path).
+            // Input Config uses open() (modeless), so activeModalWidget() is null while it is up.
+            if (!activeModalWidget() && !InputConfigDialog::currentDlg)
+            {
+                QWidget* fw = focusWidget();
+                // Our hidden IME sink handles keys itself — do not consume here.
+                if (fw && fw->objectName() == QLatin1String("melonKeySink"))
+                    return QApplication::notify(receiver, event);
+
+                const bool mappingUi = fw && (
+                    fw->inherits("KeyMapButton") ||
+                    fw->inherits("JoyMapButton") ||
+                    (fw->inherits("QLineEdit") && fw->objectName() != QLatin1String("melonKeySink")) ||
+                    fw->inherits("QTextEdit") ||
+                    fw->inherits("QPlainTextEdit") ||
+                    fw->inherits("QComboBox"));
+
+                if (!mappingUi)
+                {
+                    MainWindow* mw = qobject_cast<MainWindow*>(activeWindow());
+                    if (!mw)
+                    {
+                        for (int i = 0; i < kMaxEmuInstances; i++)
+                        {
+                            EmuInstance* inst = emuInstances[i];
+                            if (!inst)
+                                continue;
+                            MainWindow* cand = inst->getMainWindow();
+                            if (cand && cand->isActiveWindow())
+                            {
+                                mw = cand;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (mw)
+                    {
+                        // Normal path: ScreenPanel / MainWindow / key sink handlers.
+                        const bool focusOnGame =
+                            fw && (fw == mw || fw == mw->panel || mw->isKeySink(fw));
+                        if (!focusOnGame)
+                        {
+                            // Rescue: RustDesk/OpenGL often activate the HWND without Qt focus.
+                            mw->routeKeyEvent(ke, type == QEvent::KeyPress);
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return QApplication::notify(receiver, event);
 }
 
 #ifndef _WIN32
@@ -445,6 +531,15 @@ int main(int argc, char** argv)
 
         if (options->instances > 1)
             printf("Local MP: started %d instances\n", numEmuInstances());
+
+        if (options->mpLayout == "auto" && options->instances > 1)
+        {
+            // Defer until windows have screen/geometry after the event loop starts.
+            QTimer::singleShot(0, qApp, []() {
+                WindowGroup::applyAutoLayout(numEmuInstances());
+                printf("Local MP: applied auto window layout\n");
+            });
+        }
     }
 
     int ret = melon.exec();

@@ -45,6 +45,7 @@ CommandLineOptions* ManageArgs(QApplication& melon)
     parser.addOption(QCommandLineOption({"f", "fullscreen"}, "Start melonDS in fullscreen mode"));
     // Matches kMaxEmuInstances in main.cpp (local MP in-process slots).
     parser.addOption(QCommandLineOption({"n", "instances"}, "Number of local multiplayer instances to start (1-16). Same ROM/saves as File > Multiplayer > Launch new instance (.sav, .sav.2, ...)", "count", "1"));
+    parser.addOption(QCommandLineOption(QString("mp-layout"), "Local MP window layout after spawn: none (default) or auto (2=side-by-side dual-screen+lock; 4=2x2 top-only+lock)", "mode", "none"));
 
 #ifdef ARCHIVE_SUPPORT_ENABLED
     parser.addOption(QCommandLineOption({"a", "archive-file"}, "Specify file to load inside an archive given (NDS)", "rom"));
@@ -106,6 +107,21 @@ CommandLineOptions* ManageArgs(QApplication& melon)
             exit(1);
         }
         options->instances = instances;
+    }
+
+    {
+        const QString layout = parser.value("mp-layout").toLower();
+        if (layout != "none" && layout != "auto")
+        {
+            Log(LogLevel::Error, "ERROR: --mp-layout only accepts none/auto\n");
+            exit(1);
+        }
+        if (layout == "auto" && options->instances < 2)
+        {
+            Log(LogLevel::Error, "ERROR: --mp-layout auto requires -n/--instances >= 2\n");
+            exit(1);
+        }
+        options->mpLayout = layout;
     }
 
 #ifdef ARCHIVE_SUPPORT_ENABLED

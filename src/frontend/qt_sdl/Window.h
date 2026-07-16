@@ -32,6 +32,7 @@
 #include <QMutex>
 #include <QScreen>
 #include <QCloseEvent>
+#include <QLineEdit>
 
 #include "Screen.h"
 #include "Config.h"
@@ -82,6 +83,21 @@ public:
 
     void osdAddMessage(unsigned int color, const char* msg);
 
+    // Apply ScreenSizing (Even / Top only / …) and refresh layout — used by WindowGroup
+    void applyScreenSizing(int sizing);
+    void setIntegerScaling(bool enabled);
+
+    void applyMenuBarVisibility();
+    void showCompactMenu(const QPoint& globalPos);
+
+    // Forward a key to this instance (app-level rescue when ScreenPanel lacks focus).
+    void routeKeyEvent(QKeyEvent* event, bool press);
+
+    // Soft/remote keyboards (RustDesk Android) often need an IME-capable widget
+    // focused — OpenGL panels do not count. Click the game to focus this sink.
+    void focusKeySink();
+    bool isKeySink(QWidget* w) const;
+
     // called when the MP interface is changed
     void updateMPInterface(melonDS::MPInterfaceType type);
 
@@ -119,6 +135,7 @@ private slots:
 
     void onPause(bool checked);
     void onReset();
+    void onResetAll();
     void onStop();
     void onFrameStep();
     void onOpenPowerManagement();
@@ -131,6 +148,12 @@ private slots:
     void onRAMInfo();
     void onOpenTitleManager();
     void onMPNewInstance();
+    void onMPArrangeSideBySide();
+    void onMPArrangeGrid2x2();
+    void onMPDualScreenAll();
+    void onMPTopOnlyAll();
+    void onMPLockPositions(bool checked);
+    void onMPLinkedInput(bool checked);
     void onLANStartHost();
     void onLANStartClient();
     void onNPStartHost();
@@ -170,6 +193,7 @@ private slots:
     void onOpenNewWindow();
     void onChangeScreenFiltering(bool checked);
     void onChangeShowOSD(bool checked);
+    void onChangeHideMenuBar(bool checked);
     void onChangeLimitFramerate(bool checked);
     void onChangeAudioSync(bool checked);
 
@@ -200,6 +224,7 @@ private:
     void updateCartInserted(bool gba);
 
     void createScreenPanel();
+    void ensureKeySink();
 
     bool lanWarning(bool host);
 
@@ -224,6 +249,7 @@ private:
 
 public:
     ScreenPanel* panel;
+    QLineEdit* keySink = nullptr;
 
     bool hasMenu;
 
@@ -245,6 +271,7 @@ public:
 
     QAction* actPause;
     QAction* actReset;
+    QAction* actResetAll;
     QAction* actStop;
     QAction* actFrameStep;
     QAction* actPowerManagement;
@@ -255,6 +282,12 @@ public:
     QAction* actRAMInfo;
     QAction* actTitleManager;
     QAction* actMPNewInstance;
+    QAction* actMPArrangeSideBySide;
+    QAction* actMPArrangeGrid2x2;
+    QAction* actMPDualScreenAll;
+    QAction* actMPTopOnlyAll;
+    QAction* actMPLockPositions;
+    QAction* actMPLinkedInput;
     QAction* actLANStartHost;
     QAction* actLANStartClient;
     QAction* actNPStartHost;
@@ -292,6 +325,7 @@ public:
     QAction* actNewWindow;
     QAction* actScreenFiltering;
     QAction* actShowOSD;
+    QAction* actHideMenuBar;
     QAction* actLimitFramerate;
     QAction* actAudioSync;
 

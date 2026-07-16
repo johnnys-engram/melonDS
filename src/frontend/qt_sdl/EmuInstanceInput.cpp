@@ -131,7 +131,9 @@ void EmuInstance::inputLoadConfig()
         hkJoyMapping[i] = joycfg.GetInt(hotkeyNames[i]);
     }
 
-    setJoystick(localCfg.GetInt("JoystickID"));
+    // openJoystick() directly — setJoystick() also locks joyMutex (non-recursive on some platforms).
+    joystickID = localCfg.GetInt("JoystickID");
+    openJoystick();
     SDL_UnlockMutex(joyMutex.get());
 }
 
@@ -322,37 +324,136 @@ int getEventKeyVal(QKeyEvent* event)
     return key;
 }
 
+static int keyBase(int key)
+{
+    return key & ~int(Qt::KeyboardModifierMask) & ~(1 << 31);
+}
+
+// Letter/digit from soft-keyboard / Unicode inject (RustDesk Android).
+static int keyFromText(QKeyEvent* event)
+{
+    if (event->text().isEmpty())
+        return 0;
+    const QChar c = event->text().at(0).toUpper();
+    if (c >= QLatin1Char('A') && c <= QLatin1Char('Z'))
+        return Qt::Key_A + (c.unicode() - QLatin1Char('A').unicode());
+    if (c >= QLatin1Char('0') && c <= QLatin1Char('9'))
+        return Qt::Key_0 + (c.unicode() - QLatin1Char('0').unicode());
+    return 0;
+}
+
+void EmuInstance::applyKeyPress(QKeyEvent* event)
+{
+    const int keyHK = getEventKeyVal(event);
+    const int textKey = keyFromText(event);
+
+    int padKey = event->key();
+    if (padKey == 0 || padKey == Qt::Key_unknown)
+        padKey = textKey;
+    else
+        padKey = keyBase(padKey);
+
+    for (int i = 0; i < 12; i++)
+    {
+        const int mapped = keyMapping[i];
+        if (mapped == -1 || mapped == 0)
+            continue;
+        const int mappedKey = keyBase(mapped);
+        if ((padKey && padKey == mappedKey) || (textKey && textKey == mappedKey))
+            keyInputMask &= ~(1 << i);
+    }
+
+    for (int i = 0; i < HK_MAX; i++)
+    {
+        if (keyHK == hkKeyMapping[i])
+            keyHotkeyMask |= (1 << i);
+    }
+}
+
+void EmuInstance::applyKeyRelease(QKeyEvent* event)
+{
+    const int keyHK = getEventKeyVal(event);
+    const int textKey = keyFromText(event);
+
+    int padKey = event->key();
+    if (padKey == 0 || padKey == Qt::Key_unknown)
+        padKey = textKey;
+    else
+        padKey = keyBase(padKey);
+
+    for (int i = 0; i < 12; i++)
+    {
+        const int mapped = keyMapping[i];
+        if (mapped == -1 || mapped == 0)
+            continue;
+        const int mappedKey = keyBase(mapped);
+        if ((padKey && padKey == mappedKey) || (textKey && textKey == mappedKey))
+            keyInputMask |= (1 << i);
+    }
+
+    for (int i = 0; i < HK_MAX; i++)
+    {
+        if (keyHK == hkKeyMapping[i])
+            keyHotkeyMask &= ~(1 << i);
+    }
+}
 
 void EmuInstance::onKeyPress(QKeyEvent* event)
 {
-    int keyHK = getEventKeyVal(event);
-    int keyKP = keyHK;
-    if (event->modifiers() != Qt::KeypadModifier)
-        keyKP &= ~event->modifiers();
+    if (isLinkedInput() && numEmuInstances() > 1)
+    {
+        // All instances use instance 0's keybinds so they stay in sync
+        // regardless of which window receives the event.
+        EmuInstance* p0 = getEmuInstance(0);
+        if (!p0) p0 = this;
 
-    for (int i = 0; i < 12; i++)
-        if (keyKP == keyMapping[i])
-            keyInputMask &= ~(1<<i);
+        melonDS::u32 maskBefore = p0->keyInputMask;
+        melonDS::u32 hkBefore = p0->keyHotkeyMask;
+        p0->applyKeyPress(event);
 
-    for (int i = 0; i < HK_MAX; i++)
-        if (keyHK == hkKeyMapping[i])
-            keyHotkeyMask |= (1<<i);
+        melonDS::u32 padPressed = maskBefore & ~p0->keyInputMask;
+        melonDS::u32 hkPressed = ~hkBefore & p0->keyHotkeyMask;
+
+        for (int i = 1; i < 16; i++)
+        {
+            EmuInstance* peer = getEmuInstance(i);
+            if (!peer) continue;
+            peer->keyInputMask &= ~padPressed;
+            peer->keyHotkeyMask |= hkPressed;
+        }
+    }
+    else
+    {
+        applyKeyPress(event);
+    }
 }
 
 void EmuInstance::onKeyRelease(QKeyEvent* event)
 {
-    int keyHK = getEventKeyVal(event);
-    int keyKP = keyHK;
-    if (event->modifiers() != Qt::KeypadModifier)
-        keyKP &= ~event->modifiers();
+    if (isLinkedInput() && numEmuInstances() > 1)
+    {
+        EmuInstance* p0 = getEmuInstance(0);
+        if (!p0) p0 = this;
 
-    for (int i = 0; i < 12; i++)
-        if (keyKP == keyMapping[i])
-            keyInputMask |= (1<<i);
+        melonDS::u32 maskBefore = p0->keyInputMask;
+        melonDS::u32 hkBefore = p0->keyHotkeyMask;
+        p0->applyKeyRelease(event);
 
-    for (int i = 0; i < HK_MAX; i++)
-        if (keyHK == hkKeyMapping[i])
-            keyHotkeyMask &= ~(1<<i);
+        melonDS::u32 padReleased = ~maskBefore & p0->keyInputMask;
+        melonDS::u32 hkReleased = hkBefore & ~p0->keyHotkeyMask;
+
+        for (int i = 1; i < 16; i++)
+        {
+            EmuInstance* peer = getEmuInstance(i);
+            if (!peer) continue;
+            peer->keyInputMask |= padReleased;
+            peer->keyHotkeyMask &= ~hkReleased;
+        }
+    }
+    else
+    {
+        applyKeyRelease(event);
+    }
 }
 
 void EmuInstance::keyReleaseAll()
@@ -457,6 +558,22 @@ void EmuInstance::inputProcess()
     hotkeyPress = hotkeyMask & ~lastHotkeyMask;
     hotkeyRelease = lastHotkeyMask & ~hotkeyMask;
     lastHotkeyMask = hotkeyMask;
+
+    // When linked, only instance 0 drives joystick state: copy its inputMask
+    // and hotkeyMask to all peers so they use identical button state each frame.
+    if (isLinkedInput() && instanceID == 0 && numEmuInstances() > 1)
+    {
+        for (int i = 1; i < 16; i++)
+        {
+            EmuInstance* peer = getEmuInstance(i);
+            if (!peer) continue;
+            peer->inputMask = inputMask;
+            peer->hotkeyMask = hotkeyMask;
+            peer->hotkeyPress = hotkeyPress;
+            peer->hotkeyRelease = hotkeyRelease;
+        }
+    }
+
     SDL_UnlockMutex(joyMutex.get());
 }
 
@@ -465,9 +582,31 @@ void EmuInstance::touchScreen(int x, int y)
     touchX = x;
     touchY = y;
     isTouching = true;
+
+    if (isLinkedInput() && numEmuInstances() > 1)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            EmuInstance* peer = getEmuInstance(i);
+            if (!peer || peer == this) continue;
+            peer->touchX = x;
+            peer->touchY = y;
+            peer->isTouching = true;
+        }
+    }
 }
 
 void EmuInstance::releaseScreen()
 {
     isTouching = false;
+
+    if (isLinkedInput() && numEmuInstances() > 1)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            EmuInstance* peer = getEmuInstance(i);
+            if (!peer || peer == this) continue;
+            peer->isTouching = false;
+        }
+    }
 }

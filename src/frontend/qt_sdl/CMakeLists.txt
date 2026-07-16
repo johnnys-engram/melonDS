@@ -58,6 +58,9 @@ set(SOURCES_QT_SDL
     CLI.h
     CLI.cpp
 
+    WindowGroup.h
+    WindowGroup.cpp
+
     LANDialog.cpp
     NetplayDialog.cpp
 )

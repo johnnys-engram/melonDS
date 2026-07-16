@@ -47,6 +47,7 @@ class MelonApplication : public QApplication
 public:
     MelonApplication(int &argc, char** argv);
     bool event(QEvent* event) override;
+    bool notify(QObject* receiver, QEvent* event) override;
 };
 
 extern QString* systemThemeName;
@@ -58,9 +59,14 @@ bool createEmuInstance();
 void deleteEmuInstance(int id);
 void deleteAllEmuInstances(int first = 0);
 int numEmuInstances();
+EmuInstance* getEmuInstance(int id);
 
 void broadcastInstanceCommand(int cmd, QVariant& param, int sourceinst);
 
 void setMPInterface(melonDS::MPInterfaceType type);
+
+// Linked input: mirror controller state across all local-MP instances.
+bool isLinkedInput();
+void setLinkedInput(bool enabled);
 
 #endif // MAIN_H
