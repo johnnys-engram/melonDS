@@ -1914,12 +1914,19 @@ void Wifi::USTimer(u32 param)
                 // TODO: properly check the crossing of the read cursor
                 // (for example, if it is outside of the RX buffer)
 
-                Log(LogLevel::Debug, "wifi: RX buffer full (buf=%04X/%04X rd=%04X wr=%04X rxtx=%04X power=%04X com=%d rxcnt=%04X filter=%04X/%04X frame=%04X/%04X len=%d)\n",
-                       (IOPORT(W_RXBufBegin)>>1)&0xFFF, (IOPORT(W_RXBufEnd)>>1)&0xFFF,
-                       IOPORT(W_RXBufReadCursor), IOPORT(W_RXBufWriteCursor),
-                       IOPORT(W_RXTXAddr), IOPORT(W_PowerState), ComStatus,
-                       IOPORT(W_RXCnt), IOPORT(W_RXFilter), IOPORT(W_RXFilter2),
-                       *(u16*)&RXBuffer[0], *(u16*)&RXBuffer[12], *(u16*)&RXBuffer[8]);
+                // Local MP can hit this thousands of times per session; keep it visible
+                // without drowning useful output (log first hit, then every 500th).
+                static int rxFullCount = 0;
+                if (++rxFullCount == 1 || (rxFullCount % 500) == 0)
+                {
+                    Log(LogLevel::Debug, "wifi: RX buffer full (x%d) (buf=%04X/%04X rd=%04X wr=%04X rxtx=%04X power=%04X com=%d rxcnt=%04X filter=%04X/%04X frame=%04X/%04X len=%d)\n",
+                           rxFullCount,
+                           (IOPORT(W_RXBufBegin)>>1)&0xFFF, (IOPORT(W_RXBufEnd)>>1)&0xFFF,
+                           IOPORT(W_RXBufReadCursor), IOPORT(W_RXBufWriteCursor),
+                           IOPORT(W_RXTXAddr), IOPORT(W_PowerState), ComStatus,
+                           IOPORT(W_RXCnt), IOPORT(W_RXFilter), IOPORT(W_RXFilter2),
+                           *(u16*)&RXBuffer[0], *(u16*)&RXBuffer[12], *(u16*)&RXBuffer[8]);
+                }
                 RXTime = 0;
                 SetStatus(1);
                 if (TXCurSlot == 0xFFFFFFFF)
