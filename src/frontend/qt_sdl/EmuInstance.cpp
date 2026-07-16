@@ -1884,22 +1884,13 @@ bool EmuInstance::loadROM(QStringList filepath, bool reset, QString& errorstr)
     std::unique_ptr<u8[]> savedata = nullptr;
 
     std::string savname = getAssetPath(false, localCfg.GetString("SaveFilePath"), ".sav");
-    std::string origsav = savname;
     savname += instanceFileSuffix();
 
+    // Missing instance save (.sav.2 / .sav.3 / …) starts blank — do not seed from P1's .sav.
     FileHandle* sav = Platform::OpenFile(savname, FileMode::Read);
-    if (!sav)
+    if (!Platform::CheckFileWritable(savname))
     {
-        if (!Platform::CheckFileWritable(origsav))
-        {
-            errorstr = getSavErrorString(origsav, false);
-            return false;
-        }
-
-        sav = Platform::OpenFile(origsav, FileMode::Read);
-    }
-    else if (!Platform::CheckFileWritable(savname))
-    {
+        if (sav) CloseFile(sav);
         errorstr = getSavErrorString(savname, false);
         return false;
     }
@@ -2043,22 +2034,13 @@ bool EmuInstance::loadGBAROM(QStringList filepath, QString& errorstr)
     std::unique_ptr<u8[]> savedata = nullptr;
 
     std::string savname = getAssetPath(true, localCfg.GetString("SaveFilePath"), ".sav");
-    std::string origsav = savname;
     savname += instanceFileSuffix();
 
+    // Missing instance save starts blank — do not seed from P1's .sav.
     FileHandle* sav = Platform::OpenFile(savname, FileMode::Read);
-    if (!sav)
+    if (!Platform::CheckFileWritable(savname))
     {
-        if (!Platform::CheckFileWritable(origsav))
-        {
-            errorstr = getSavErrorString(origsav, true);
-            return false;
-        }
-
-        sav = Platform::OpenFile(origsav, FileMode::Read);
-    }
-    else if (!Platform::CheckFileWritable(savname))
-    {
+        if (sav) CloseFile(sav);
         errorstr = getSavErrorString(savname, true);
         return false;
     }
