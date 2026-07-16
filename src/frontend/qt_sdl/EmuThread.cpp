@@ -702,22 +702,53 @@ void EmuThread::emuRun()
     waitMessage();
 }
 
+static std::vector<EmuThread*> collectEmuThreads()
+{
+    // Keep in sync with kMaxEmuInstances in main.cpp.
+    constexpr int kMaxInstances = 16;
+    std::vector<EmuThread*> threads;
+    for (int i = 0; i < kMaxInstances; i++)
+    {
+        EmuInstance* inst = getEmuInstance(i);
+        if (!inst) continue;
+        EmuThread* t = inst->getEmuThread();
+        if (t) threads.push_back(t);
+    }
+    return threads;
+}
+
 void EmuThread::emuPause(bool broadcast)
 {
-    sendMessage(msg_EmuPause);
-    waitMessage();
+    if (!broadcast)
+    {
+        sendMessage(msg_EmuPause);
+        waitMessage();
+        return;
+    }
 
-    if (broadcast)
-        emuInstance->broadcastCommand(InstCmd_Pause);
+    // Queue Pause to every instance first, then wait. Serial pause+wait under LocalMP
+    // stalls the UI thread while peers block on each other (esp. with heavy GAME_LOG).
+    auto threads = collectEmuThreads();
+    for (EmuThread* t : threads)
+        t->sendMessage(msg_EmuPause);
+    for (EmuThread* t : threads)
+        t->waitMessage();
 }
 
 void EmuThread::emuUnpause(bool broadcast)
 {
-    sendMessage(msg_EmuUnpause);
-    waitMessage();
+    if (!broadcast)
+    {
+        sendMessage(msg_EmuUnpause);
+        waitMessage();
+        return;
+    }
 
-    if (broadcast)
-        emuInstance->broadcastCommand(InstCmd_Unpause);
+    auto threads = collectEmuThreads();
+    for (EmuThread* t : threads)
+        t->sendMessage(msg_EmuUnpause);
+    for (EmuThread* t : threads)
+        t->waitMessage();
 }
 
 void EmuThread::emuTogglePause(bool broadcast)
